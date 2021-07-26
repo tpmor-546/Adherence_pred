@@ -1,0 +1,264 @@
+---
+title: "Adherence_pred_fast_final"
+author: "Tim Morris"
+date: "7/26/2021"
+output: html_document
+---
+---
+title: "Predicting_adherence_FAST"
+author: "Tim Morris"
+date: "7/26/2021"
+output: html_document
+---
+# Load libraries
+```{r echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+library(dplyr) # for data wrangling
+library(caret) # for modelling
+library(tidyverse) # for modelling
+library(pensim) # for modelling
+library(penalized) # for modelling
+library(purrr) # for permutation testing
+library(ggplot2) # for plots
+library(rlang) # for plots
+library(ggpubr) # for demographics
+library(tableone) # for demographics
+library(survival) # for demographics
+```
+# Test group differences in outcome and table 1 creation 
+```{r}
+#Anova to test group differences in Adherence
+ggboxplot(bh, x = "group", y = "Adherence", 
+          color = "group", palette = c("#00AFBB", "#E7B800", "#FC4E07", "#404040"),
+          order = c("1", "2", "3", "4"),
+          ylab = "Adherence", xlab = "Group")
+
+# Compute the analysis of variance
+res.aov <- aov(Adherence ~ group, data = bh)
+# Summary of the analysis
+summary(res.aov)
+
+# table 1 creation and group differences in vars
+######## Table one ###### Note: doesnt work on cluster- performed on local Rstudio
+#Create a variable list which we want in Table 1
+listVars <- c("currentAge", "sex", "racem0", "Adherence", "edum0", "incomem0", "employm0")
+#Define categorical variables
+catVars <- c("sex", "racem0", "employm0")
+strata <- c("group")
+#Total Population
+table1 <- CreateTableOne(vars = listVars, strata = strata, data = behavioral, factorVars = catVars, test = TRUE)
+print(table1)
+table <- kableone(table1)
+```
+# univariate correlations with outcome
+```{r}
+per_s <- data.frame(scaled.dat <- scale(imaging1)) # centers and scales variables
+varlist <- names(multimodal)[-38] # creates var name list minus adherene var
+models <- lapply(varlist, function(x) {
+  lm(substitute(Adherence ~ i, list(i = as.name(x))), data = multimodal)
+})
+lapply(models, summary) # applys funciton models to all vars in per_s and prints summary output
+
+models <- lapply(varlist, function(x) {
+  cor.test(substitute( ~ Adherence + i, list(i = as.name(x))), data = multimodal)
+})
+lapply(models, summary) # applys funciton models to all vars in per_s and prints summary output
+
+cors2 <- sapply(multimodal, cor.test, y=multimodal$Adherence)
+
+cors <-unlist(cors2) # unlists pvalues
+pvals <- cors[seq(3,length(cors),10)] # selects just pvalues (there was the intercept in every other space)
+r <- cors[seq(4,length(cors),10)] # selects just pvalues (there was the intercept in every other space)
+
+pvals <- pvals[-38]
+r <- r[-38]
+cors3 <- tibble(varlist,r,pvals) # creates tibble of vars + pvalues
+```
+# feature engineering 
+# regress out age, gender and meanFD from imaging data (meanFD for fmri only) in test and train
+```{r}
+# NOTE: must change train.data_x in certain places to correspond to each each dataset you are controlling for and must change formula for fmri vs structural models
+varlist <- names(imaging)[306:441] # creates var name list (2:301 for imaging, 306:441 for structural)
+models <- lapply(varlist, function(x) {
+  lm(substitute(i ~ age + gender, list(i = as.name(x))), data = imaging) # + meanFD for fMRI features
+})
+list_resid = lapply(models, resid) #  
+df_resid = do.call(cbind.data.frame, list_resid)
+
+curnames <-names(df_resid)
+df_resid <- as_tibble(df_resid)
+
+fmri <- df_resid %>% rename_at(vars(curnames), ~ varlist)
+
+struct <- df_resid %>% rename_at(vars(curnames), ~ varlist)
+
+# put back together 
+imaging1 <- cbind(fmri, struct)
+imaging1['Adherence'] <- imaging$Adherence # append adherence
+```
+# manual feature selection: Remove vars that do not correlate with adherence at p<0.1
+```{r}
+# manual feature selection
+per_s <- data.frame(scaled.dat <- scale(imaging1)) # centers and scales variables
+
+varlist <- names(per_s)[-437] # creates var name list minus adherene var
+models <- lapply(varlist, function(x) {
+  lm(substitute(Adherence ~ i, list(i = as.name(x))), data = per_s)
+})
+lapply(models, summary) # applys funciton models to all vars in per_s and prints summary output
+p <- (sapply(models, function(x) summary(x)$coefficients[,4])) # creates list of pvalues from each model
+#coefs <- (sapply(models, function(x) summary(x)$coefficients[,4])) # creates list of pvalues from each model
+p <-unlist(p) # unlists pvalues
+pvals <- p[seq(0,length(p),2)] # selects just pvalues (there was the intercept in every other space)
+pvalues <- tibble(varlist,pvals) # creates tibble of vars + pvalues
+pvaldat <- pvalues %>% 
+  filter(pvals < 0.1) # selects just those vars that correlate with outcome at p<0.1
+pvarlist <- pvaldat$varlist # creates varlist with just those vars at p<0.1
+imaging2 <- imaging1 %>% dplyr::select(all_of(pvarlist)) # selects just those vars from comeplte tibble and forms final train data to use in models
+imaging2['Adherence'] <- imaging1$Adherence # append adherence
+
+# create df for just those in walking group for supplementary material sensitivity analysis
+multimodal_walk <- multimodal
+multimodal_walk['group'] <- mm$group # append group
+multimodal_walk <-filter(multimodal_walk,group>=3)
+```
+# Prediction models
+#pensim nested CV
+```{r}
+
+# change for each model 
+data <- imaging2[-32] 
+out <- imaging2$Adherence
+
+#Elastic Net model specifications- see pensim vignette for details 
+set.seed(123)
+preds <-
+  opt.nested.crossval(
+    outerfold = 10,
+    nprocessors = 1,
+    #opt.nested.crossval arguments
+    optFUN = "opt2D",
+    scaling = TRUE,
+    #opt.splitval arguments
+    nsim = 25,
+    L1range = c(0.1, 1),
+    L2range = c(1, 100),
+    dofirst = "both",
+    L1gridsize = 10, L2gridsize = 10,
+    #opt1D arguments
+    response = out,
+    #rest are penalized::optl1 arguments
+    penalized = data,
+    fold = 10,
+    positive = FALSE,
+    standardize = TRUE,
+    trace = FALSE,
+  )
+
+ # extract coeficients
+coefs <- pensim::opt2D(
+    #opt.splitval arguments
+    nsim = 25,
+    L1range = c(0.1, 1),
+    L2range = c(1, 100),
+    dofirst = "both",
+    L1gridsize = 10, L2gridsize = 10,
+    #opt1D arguments
+    response = out,
+    #rest are penalized::optl1 arguments
+    penalized = data,
+    fold = 10,
+    positive = FALSE,
+    standardize = TRUE,
+    trace = FALSE
+)
+
+# performance metrics
+metrics <- data.frame( R2 = R2(preds, out),
+            RMSE = RMSE(preds, out),
+            MAE = MAE(preds, out))
+
+#ridge model specification for behavioral only model (EN failed to find a solution)
+data <- behavioral2[-7]
+out <- behavioral2$Adherence
+
+# first establish args for penalized reg. 
+set.seed(123)
+model <- penalized::optL2(
+  response = out,
+  penalized = data,
+  lambda1 = 0,
+  minlambda2 = 1,
+  maxlambda2 = 100,
+  fold = 10,
+  positive = FALSE,
+  standardize = TRUE,
+  trace = TRUE
+)
+
+model <- penalized::cvl(
+  response = out,
+  penalized = data,
+  lambda1 = 0,
+  lambda2 = 0,
+  fold = 10,
+  L1gridsize = 10, L2gridsize = 10,
+  positive = FALSE,
+  standardize = TRUE,
+  trace = FALSE
+)
+
+df <- as_tibble(model$predictions)
+df1 <- multimodal_walk %>% dplyr::select(Adherence)
+df1["pred"]<- df$mu
+
+coefficients(model$fullfit)
+
+metrics_b <- data.frame( R2 = R2(df1$pred, df1$Adherence),
+            RMSE = RMSE(df1$pred, df1$Adherence),
+            MAE = MAE(df1$pred, df1$Adherence))
+metrics_b
+
+```
+## Random permutation to compare obsrved model metrics to permuted datsets
+```{r}
+# Permutes the oberseved vs predicted values 1000 times and outputs a null distribution of predicitons and a p-vlue comparing the actual prediction vs the null distribution: p-value of the permutation test is calculated as the proportion of sampled permutations that are greater or equal to the true prediction correlation.
+
+result <- behavioral2 %>% dplyr::select(Adherence)
+result["predicted"]<- df1$pred #preds
+set.seed(123)
+x.test_perm <- modelr::permute(result, 1000, Adherence) 
+library(purrr)
+models <- map(x.test_perm$perm, ~ lm(Adherence ~ predicted, data = .))
+glanced <- map_df(models, broom::glance, Adherence)
+# distribution of null permutation statistics
+imaging2$pred <- preds
+mod <- lm(result$Adherence ~ result$predicted)
+mean(glanced$r.squared > broom::glance(mod)$r.squared)
+```
+# PLOTS #
+```{r pressure, echo=FALSE}
+# hitogram plots
+p<-ggplot(glanced, aes(x=r.squared)) + geom_histogram() +
+  geom_vline(aes(xintercept=0.06),
+            color="orange", size=1)
+p
+## Scatter plot function
+scatterplot <- function(dataframe, x, y, xlab, ylab) {
+  ggplot(data = dataframe, aes(x={{x}}, y = {{y}})) + 
+    geom_point(color =  "#3B9AB2") + 
+    #theme(
+      # Hide panel borders and remove grid lines
+      #panel.border = element_blank(),
+      #panel.grid.major = element_blank(),
+      #panel.grid.minor = element_blank(),
+      #panel.background = element_blank(),
+      # Change axis line
+      #axis.line = element_line(colour = "black")
+    #) +
+    labs(y=ylab, x = xlab) +
+    stat_smooth(method = "lm", col = "orange")
+}
+
+#scatterplot run
+scatterplot(result, predicted, Adherence, "Predicted", "Observed")
+```
