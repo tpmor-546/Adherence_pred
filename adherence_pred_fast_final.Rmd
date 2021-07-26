@@ -38,7 +38,7 @@ res.aov <- aov(Adherence ~ group, data = bh)
 summary(res.aov)
 
 # table 1 creation and group differences in vars
-######## Table one ###### Note: doesnt work on cluster- performed on local Rstudio
+######## Table one ###### 
 #Create a variable list which we want in Table 1
 listVars <- c("currentAge", "sex", "racem0", "Adherence", "edum0", "incomem0", "employm0")
 #Define categorical variables
@@ -61,7 +61,7 @@ lapply(models, summary) # applys funciton models to all vars in per_s and prints
 models <- lapply(varlist, function(x) {
   cor.test(substitute( ~ Adherence + i, list(i = as.name(x))), data = multimodal)
 })
-lapply(models, summary) # applys funciton models to all vars in per_s and prints summary output
+lapply(models, summary) # applys function models to all vars in per_s and prints summary output
 
 cors2 <- sapply(multimodal, cor.test, y=multimodal$Adherence)
 
@@ -74,9 +74,9 @@ r <- r[-38]
 cors3 <- tibble(varlist,r,pvals) # creates tibble of vars + pvalues
 ```
 # feature engineering 
-# regress out age, gender and meanFD from imaging data (meanFD for fmri only) in test and train
+# regress out age, gender and meanFD from imaging data (meanFD for fmri only)
 ```{r}
-# NOTE: must change train.data_x in certain places to correspond to each each dataset you are controlling for and must change formula for fmri vs structural models
+# NOTE: must change formula for each imaging var (age+gender for structure, age+gender+meanFD for function)
 varlist <- names(imaging)[306:441] # creates var name list (2:301 for imaging, 306:441 for structural)
 models <- lapply(varlist, function(x) {
   lm(substitute(i ~ age + gender, list(i = as.name(x))), data = imaging) # + meanFD for fMRI features
