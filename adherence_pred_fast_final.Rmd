@@ -27,7 +27,7 @@ library(pensim)
 load(file = "behavioural_final.Rdata")
 load(file = "imaging_final.Rdata") # loads imaging final data with n=131 from "imaging_model_FINAL.Rmd"
 ```
-# regress out age, gender and meanFD from imaging data (meanFD for fmri only) in test and train
+# regress out age, gender and meanFD from imaging data (meanFD for fmri only) 
 ```{r}
 # NOTE: must change train.data_x in certain places to correspond to each each dataset you are controlling for and must change formula for fmri vs structural models
 varlist <- names(imaging)[306:441] # creates var name list (2:301 for imaging, 306:441 for structural)
@@ -50,14 +50,6 @@ imaging1['Adherence'] <- imaging$Adherence # append adherence
 ```
 # feature reduction
 ```{r}
-#Not sure if this is needed
-caretSBF$score
-function (x, y) 
-{
-  if (is.factor(y)) 
-    anovaScores(x, y)
-  else gamScores(x, y)
-}
 #creates function to select only vars in training set that corr with outcome at p0.1
 mySBF <- caretSBF
 mySBF$filter <- function(score, x, y) { score <= 0.1 }
