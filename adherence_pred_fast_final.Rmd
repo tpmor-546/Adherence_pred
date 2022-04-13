@@ -8,6 +8,7 @@ output:
 editor_options:
   chunk_output_type: console
 ---
+# edit test on github
 #load libraries
 ```{r echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
 # if need to bootstrap models to statsitically compre, take final lambda values and nuild final model using either penalized or caret, then bootstrap using penalized code or resmaple funciton in caret. 
