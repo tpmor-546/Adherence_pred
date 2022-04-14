@@ -9,6 +9,7 @@ editor_options:
   chunk_output_type: console
 ---
 # this is a test for mark
+# this is a test for tim
 # edit test on github
 #load libraries
 ```{r echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
