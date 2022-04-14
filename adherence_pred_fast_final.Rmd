@@ -11,6 +11,7 @@ editor_options:
 # this is a test for mark
 # this is a test for tim
 # edit test on github
+ffhewiufheiufheefc
 #load libraries
 ```{r echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
 # if need to bootstrap models to statsitically compre, take final lambda values and nuild final model using either penalized or caret, then bootstrap using penalized code or resmaple funciton in caret. 
